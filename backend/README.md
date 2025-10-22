@@ -13,6 +13,22 @@ A Flask-based backend service for ranking resumes using TOPSIS (Technique for Or
 
 ## Setup
 
+### Option 1: Docker (Recommended)
+
+1. **Using Docker Compose**:
+   ```bash
+   docker-compose up --build
+   ```
+
+2. **Using Docker directly**:
+   ```bash
+   cd backend
+   docker build -t resume-ranker .
+   docker run -p 5000:5000 resume-ranker
+   ```
+
+### Option 2: Local Development
+
 1. **Install Dependencies**:
    ```bash
    pip install -r requirements.txt
@@ -29,6 +45,8 @@ A Flask-based backend service for ranking resumes using TOPSIS (Technique for Or
    ```
 
 The server will start on `http://localhost:5000`
+
+For detailed Docker instructions, see [DOCKER_README.md](DOCKER_README.md)
 
 ## API Endpoints
 

@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  resume-ranker:
+    build: ./backend
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./backend/uploads:/app/uploads
+      - ./backend/resume_ranker.db:/app/resume_ranker.db
+    environment:
+      - FLASK_ENV=production
+      - SECRET_KEY=your-secret-key-change-in-production
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
