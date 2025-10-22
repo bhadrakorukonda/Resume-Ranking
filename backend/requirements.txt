@@ -1,0 +1,8 @@
+Flask==2.3.3
+SQLAlchemy==2.0.21
+PyPDF2==3.0.1
+spacy==3.6.1
+rapidfuzz==3.2.0
+numpy==1.24.3
+Werkzeug==2.3.7
+python-dotenv==1.0.0

@@ -1,0 +1,11 @@
+John Doe
+Email: johndoe@example.com
+Phone: +91 98765 43210
+
+Skills: Python, SQL, Machine Learning, Django
+
+Experience: 3 years at ABC Corp
+
+Education: B.Tech in Computer Science
+
+Certifications: AWS Certified, Coursera Deep Learning
