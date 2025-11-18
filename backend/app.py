@@ -55,13 +55,16 @@ def create_weights():
         if not data:
             return jsonify({'error': 'No JSON data provided'}), 400
         
+        # Extract weights from data
+        weights = {k: v for k, v in data.items() if k != 'name'}
+        
         # Validate weights
-        is_valid, error_msg = validate_weights(data)
+        is_valid, error_msg = validate_weights(weights)
         if not is_valid:
             return jsonify({'error': error_msg}), 400
         
         # Normalize weights
-        normalized_weights = normalize_weights(data)
+        normalized_weights = normalize_weights(weights)
         
         db = next(get_db())
         try:
