@@ -17,55 +17,89 @@ except (OSError, Exception) as e:
     nlp = None
 
 def extract_text_from_pdf(pdf_path: str) -> str:
-    """Extract text from PDF file using PyPDF2"""
+    """Extract text from PDF file using pdfplumber (better than PyPDF2) with fallback to PyPDF2"""
+    try:
+        import pdfplumber
+        with pdfplumber.open(pdf_path) as pdf:
+            text = ""
+            for page in pdf.pages:
+                page_text = page.extract_text()
+                if page_text:
+                    text += page_text + " "
+            
+            # Clean up the extracted text
+            if text:
+                # Replace multiple spaces with single space
+                text = ' '.join(text.split())
+                return text.strip()
+    except ImportError:
+        logger.warning("pdfplumber not available, falling back to PyPDF2")
+    except Exception as e:
+        logger.warning(f"pdfplumber extraction failed: {e}, falling back to PyPDF2")
+    
+    # Fallback to PyPDF2
     try:
         with open(pdf_path, 'rb') as file:
             pdf_reader = PyPDF2.PdfReader(file)
             text = ""
             for page in pdf_reader.pages:
-                text += page.extract_text() + "\n"
-        return text.strip()
+                page_text = page.extract_text()
+                if page_text:
+                    text += page_text + " "
+            
+            # Clean up common PDF extraction issues
+            if text:
+                text = text.replace('\n', ' ')  # Replace newlines with spaces
+                text = ' '.join(text.split())  # Remove extra whitespace
+                
+                # Fix common PDF extraction artifacts where spaces appear in the middle of words
+                # Pattern to fix single characters separated by spaces (like "F ull-Stac k" -> "Full-Stack")
+                text = re.sub(r'(\w)\s+(\w)', lambda m: m.group(1) + m.group(2) if len(m.group(1)) == 1 or len(m.group(2)) == 1 else m.group(1) + ' ' + m.group(2), text)
+                
+                return text.strip()
     except Exception as e:
         logger.error(f"Error extracting text from PDF {pdf_path}: {str(e)}")
-        return ""
+    
+    return ""
 
 def extract_skills(text: str) -> List[str]:
-    """Extract skills from resume text using spaCy NER and keyword matching"""
-    if not nlp:
-        return extract_skills_fallback(text)
+    """Extract skills from resume text using improved keyword matching"""
+    if not text:
+        return []
     
-    doc = nlp(text)
-    skills = set()
-    
-    # Common technical skills keywords
+    # Common technical skills keywords (expanded and cleaned)
     skill_keywords = [
         'python', 'java', 'javascript', 'react', 'angular', 'vue', 'node.js', 'django', 'flask',
-        'sql', 'postgresql', 'mysql', 'mongodb', 'redis', 'docker', 'kubernetes', 'aws', 'azure',
-        'git', 'github', 'gitlab', 'jenkins', 'ci/cd', 'agile', 'scrum', 'machine learning',
-        'data science', 'pandas', 'numpy', 'tensorflow', 'pytorch', 'scikit-learn', 'r',
-        'tableau', 'power bi', 'excel', 'vba', 'html', 'css', 'bootstrap', 'jquery',
-        'rest api', 'graphql', 'microservices', 'linux', 'unix', 'bash', 'powershell'
+        'sql', 'postgresql', 'mysql', 'mongodb', 'redis', 'docker', 'kubernetes', 'aws', 'azure', 'gcp',
+        'git', 'github', 'gitlab', 'jenkins', 'ci/cd', 'agile', 'scrum', 'kanban',
+        'machine learning', 'deep learning', 'neural networks', 'nlp', 'computer vision', 'tensorflow', 'pytorch', 'scikit-learn',
+        'data science', 'pandas', 'numpy', 'matplotlib', 'seaborn', 'jupyter', 'tableau', 'power bi',
+        'html', 'css', 'bootstrap', 'tailwind', 'jquery', 'sass', 'less',
+        'rest api', 'graphql', 'microservices', 'linux', 'unix', 'bash', 'powershell',
+        'c++', 'c#', 'php', 'ruby', 'go', 'rust', 'kotlin', 'swift',
+        'spring', 'hibernate', '.net', 'asp.net', 'laravel', 'rails',
+        'android', 'ios', 'react native', 'flutter', 'ionic',
+        'opencv', 'keras', 'fastai', 'hugging face', 'spacy', 'nltk'
     ]
     
-    # Extract from NER
-    for ent in doc.ents:
-        if ent.label_ in ['ORG', 'PRODUCT', 'TECH']:
-            skills.add(ent.text.lower())
-    
-    # Extract from keywords
     text_lower = text.lower()
+    skills = set()
+    
+    # Extract from keywords with better matching
     for keyword in skill_keywords:
         if keyword in text_lower:
             skills.add(keyword)
     
-    # Extract from noun phrases that might be skills
-    for chunk in doc.noun_chunks:
-        chunk_text = chunk.text.lower().strip()
-        if len(chunk_text) > 2 and any(char.isalpha() for char in chunk_text):
-            if any(skill in chunk_text for skill in skill_keywords):
-                skills.add(chunk_text)
+    # Filter out skills that are too short or contain spaces in wrong places
+    filtered_skills = []
+    for skill in skills:
+        # Remove skills that are too short or contain weird characters
+        if len(skill) >= 3 and not any(char in skill for char in ['\n', '\t', '\r']):
+            # Remove skills that look like fragments (contain spaces in middle in weird ways)
+            if ' ' not in skill or len(skill.split()) <= 4:  # Allow multi-word skills up to 4 words
+                filtered_skills.append(skill)
     
-    return list(skills)
+    return sorted(list(set(filtered_skills)))
 
 def extract_skills_fallback(text: str) -> List[str]:
     """Fallback skill extraction without spaCy"""
@@ -236,6 +270,102 @@ def extract_features(resume_text: str, job_description: str = "") -> Dict[str, f
     features['education'] = extract_education_level(resume_text)
     
     return features
+
+def extract_name(text: str) -> str:
+    """Extract candidate name from resume text"""
+    if not text:
+        return "Unknown"
+    
+    # First, try to find name at the very beginning of the text
+    first_line = text.split('\n')[0].strip()
+    words = first_line.split()
+    
+    # Look for 2-3 words that could be a name (capitalized)
+    for i in range(len(words)):
+        for j in range(i+1, min(i+4, len(words)+1)):
+            candidate_name = ' '.join(words[i:j])
+            # Check if it looks like a name (2-3 words, starts with capital letters)
+            name_words = candidate_name.split()
+            if 2 <= len(name_words) <= 3:
+                if all(word[0].isupper() for word in name_words if word):
+                    # Make sure it's not a common phrase
+                    if not any(phrase in candidate_name.lower() for phrase in ['engineer', 'developer', 'scientist', 'analyst', 'manager']):
+                        return candidate_name.title()
+    
+    # Fallback: look for name patterns in the text
+    lines = text.split('\n')[:10]  # Check first 10 lines
+    
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+            
+        # Skip lines that are clearly not names
+        skip_indicators = ['email', 'phone', 'address', 'linkedin', 'github', 'education', 'experience', 'skills', 'projects']
+        if any(indicator in line.lower() for indicator in skip_indicators):
+            continue
+            
+        # Look for name-like patterns (2-4 words, title case or all caps)
+        words = line.split()
+        if 2 <= len(words) <= 4:
+            # Check if it looks like a name (starts with capital letters)
+            if all(word[0].isupper() for word in words if word):
+                # Filter out common resume headers
+                if not any(header in line.lower() for header in ['resume', 'cv', 'curriculum vitae', 'professional summary']):
+                    return line.title()
+    
+    # Fallback: try to find name near email
+    email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+    email_match = re.search(email_pattern, text)
+    if email_match:
+        # Look for name before email in the same line or nearby
+        email_start = email_match.start()
+        text_before_email = text[:email_start]
+        lines_before = text_before_email.split('\n')[-3:]  # Last 3 lines before email
+        
+        for line in reversed(lines_before):
+            line = line.strip()
+            words = line.split()
+            if 2 <= len(words) <= 4 and all(word[0].isupper() for word in words if word):
+                return line.title()
+    
+    return "Unknown"
+
+def extract_email(text: str) -> str:
+    """Extract email address from resume text"""
+    if not text:
+        return ""
+    
+    # Email regex pattern
+    email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+    matches = re.findall(email_pattern, text)
+    
+    if matches:
+        return matches[0]  # Return first email found
+    
+    return ""
+
+def extract_phone(text: str) -> str:
+    """Extract phone number from resume text"""
+    if not text:
+        return ""
+    
+    # Phone number patterns
+    phone_patterns = [
+        r'\+\d{1,3}[\s\-\.]?\d{3,4}[\s\-\.]?\d{3,4}[\s\-\.]?\d{3,4}',  # +91 8639448680
+        r'\d{3}[\s\-\.]\d{3}[\s\-\.]\d{4}',  # 123-456-7890
+        r'\d{10,12}',  # 8639448680
+    ]
+    
+    for pattern in phone_patterns:
+        matches = re.findall(pattern, text)
+        for match in matches:
+            # Clean up the phone number
+            clean_phone = re.sub(r'[^\d+\-\.\s]', '', match).strip()
+            if len(clean_phone.replace(' ', '').replace('-', '').replace('.', '')) >= 10:
+                return clean_phone
+    
+    return ""
 
 def normalize_features(features: Dict[str, float]) -> Dict[str, float]:
     """Normalize features to 0-1 range"""

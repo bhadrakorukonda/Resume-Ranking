@@ -43,6 +43,15 @@ class TestResumeRankerAPI(unittest.TestCase):
     
     def test_create_weights(self):
         """Test creating new weights"""
+        # Clear any existing weights with the same name
+        with self.app.app_context():
+            db = next(get_db())
+            try:
+                db.query(Weights).filter(Weights.name == 'Test Weights').delete()
+                db.commit()
+            finally:
+                db.close()
+        
         weights_data = {
             'name': 'Test Weights',
             'skill_match': 0.3,
@@ -80,8 +89,25 @@ class TestResumeRankerAPI(unittest.TestCase):
     
     def test_rank_candidates_no_candidates(self):
         """Test ranking when no candidates exist"""
+        # Clear any existing candidates
+        with self.app.app_context():
+            db = next(get_db())
+            try:
+                db.query(Candidate).delete()
+                db.commit()
+            finally:
+                db.close()
+        
         response = self.client.post('/rank',
-                                  data=json.dumps({}),
+                                  data=json.dumps({
+                                      'weights': {
+                                          'skill_match': 0.3,
+                                          'jd_alignment': 0.3,
+                                          'exp_years': 0.2,
+                                          'projects': 0.1,
+                                          'education': 0.1
+                                      }
+                                  }),
                                   content_type='application/json')
         self.assertEqual(response.status_code, 404)
         data = json.loads(response.data)

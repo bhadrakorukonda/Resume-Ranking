@@ -1,7 +1,9 @@
 from flask import Flask, request, jsonify, send_from_directory
+from flask_cors import CORS
 from werkzeug.utils import secure_filename
 import os
 import json
+import logging
 from datetime import datetime
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
@@ -9,10 +11,15 @@ from sqlalchemy import desc
 from config import UPLOAD_FOLDER, ALLOWED_EXTENSIONS, MAX_CONTENT_LENGTH, DEFAULT_WEIGHTS
 from db import get_db, init_db, get_default_weights
 from models import Candidate, Weights
-from nlp import extract_text_from_pdf, extract_features, normalize_features
+from nlp import extract_text_from_pdf, extract_features, normalize_features, extract_name, extract_email, extract_phone
 from mcdm import rank_candidates, validate_weights, normalize_weights
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 app = Flask(__name__)
+CORS(app)  # Enable CORS for all routes
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
 
@@ -127,8 +134,19 @@ def upload_resume():
         # Extract text from PDF
         resume_text = extract_text_from_pdf(filepath)
         if not resume_text:
-            os.remove(filepath)  # Clean up file
-            return jsonify({'error': 'Could not extract text from PDF'}), 400
+            # If PDF text extraction fails, use filename as basic text
+            resume_text = f"Resume: {filename}"
+            logger.warning(f"Could not extract text from PDF {filename}, using fallback text")
+        
+        # Extract candidate information from the resume text
+        extracted_name = extract_name(resume_text)
+        extracted_email = extract_email(resume_text)
+        extracted_phone = extract_phone(resume_text)
+        
+        # Use extracted info if form data is not provided
+        candidate_name = request.form.get('name') or extracted_name
+        candidate_email = request.form.get('email') or extracted_email
+        candidate_phone = request.form.get('phone') or extracted_phone
         
         # Extract features
         features = extract_features(resume_text, job_description)
@@ -138,9 +156,9 @@ def upload_resume():
         db = next(get_db())
         try:
             candidate = Candidate(
-                name=request.form.get('name', 'Unknown'),
-                email=request.form.get('email', ''),
-                phone=request.form.get('phone', ''),
+                name=candidate_name,
+                email=candidate_email,
+                phone=candidate_phone,
                 resume_text=resume_text,
                 resume_filename=filename,
                 skill_match=normalized_features['skill_match'],
@@ -258,25 +276,29 @@ def get_candidate(candidate_id):
     finally:
         db.close()
 
-@app.route('/candidates/<int:candidate_id>', methods=['DELETE'])
-def delete_candidate(candidate_id):
-    """Delete candidate by ID"""
+@app.route('/candidates', methods=['DELETE'])
+def delete_all_candidates():
+    """Delete all candidates"""
     db = next(get_db())
     try:
-        candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()
-        if not candidate:
-            return jsonify({'error': 'Candidate not found'}), 404
+        # Get all candidates to delete their files
+        candidates = db.query(Candidate).all()
         
-        # Delete associated file
-        if candidate.resume_filename:
-            filepath = os.path.join(app.config['UPLOAD_FOLDER'], candidate.resume_filename)
-            if os.path.exists(filepath):
-                os.remove(filepath)
+        # Delete associated files
+        for candidate in candidates:
+            if candidate.resume_filename:
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], candidate.resume_filename)
+                if os.path.exists(filepath):
+                    os.remove(filepath)
         
-        db.delete(candidate)
+        # Delete all candidates from database
+        count = db.query(Candidate).delete()
         db.commit()
         
-        return jsonify({'message': 'Candidate deleted successfully'})
+        return jsonify({
+            'message': f'Successfully deleted {count} candidates and their resume files',
+            'deleted_count': count
+        })
     except Exception as e:
         db.rollback()
         return jsonify({'error': str(e)}), 500
